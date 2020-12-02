@@ -1,0 +1,6 @@
+-- 查询数量
+SELECT '科目数量',COUNT (*) FROM T_Subject UNION
+SELECT '章节数量',COUNT (*) FROM T_Catalog UNION
+SELECT '题目数量',COUNT (*) FROM T_Item UNION
+SELECT '热点题目',COUNT (*) FROM t_Hotspot UNION
+SELECT '易错题目',COUNT (*) FROM t_Fallible

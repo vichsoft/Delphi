@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{A121E68E-163D-4554-BCF4-82854686BAB1}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="TKMerge.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="P:\题库\ExamDataBase\ExamDB.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="TKMerge">
+        <MSBuild Projects="TKMerge.dproj"/>
+    </Target>
+    <Target Name="TKMerge:Clean">
+        <MSBuild Projects="TKMerge.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="TKMerge:Make">
+        <MSBuild Projects="TKMerge.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="ExamDB">
+        <MSBuild Projects="P:\题库\ExamDataBase\ExamDB.dproj"/>
+    </Target>
+    <Target Name="ExamDB:Clean">
+        <MSBuild Projects="P:\题库\ExamDataBase\ExamDB.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="ExamDB:Make">
+        <MSBuild Projects="P:\题库\ExamDataBase\ExamDB.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="TKMerge;ExamDB"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="TKMerge:Clean;ExamDB:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="TKMerge:Make;ExamDB:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

@@ -1,0 +1,39 @@
+<html>
+<meta charset="UTF-8">
+<title>解密测试</title>
+<script type="text/javascript" src="crypto-js.js"></script>
+<script>
+    function Decode(s) {
+        var keyHex = CryptoJS.enc.Utf8.parse("5QTtRO3vQMaYnPajQqc4d7eaF6BNS2dG");
+        var ivHex = CryptoJS.enc.Utf8.parse("5QTtRO3vQMaYnPajQqc4d7eaF6BNS2dG");
+        var decrypted = CryptoJS.DES.decrypt({
+            ciphertext: CryptoJS.enc.Hex.parse(s)
+        }, keyHex, {
+            iv: ivHex,
+            mode: CryptoJS.mode.CBC,
+            padding: CryptoJS.pad.Pkcs7
+        });
+        return decrypted.toString(CryptoJS.enc.Utf8);
+    }
+
+    function test() {
+        var s = document.getElementById("txtSrc");
+        src = s.value;
+        dest = Decode(src);
+        var d = document.getElementById("txtDest");
+        d.value = dest;
+    }
+</script>
+
+<body>
+    <div>
+        <textarea id="txtSrc" style="height: 50;width:200;margin-bottom: 10px;"></textarea>
+    </div>
+    <div>
+        <textarea id="txtDest" style="height: 50;width:200"></textarea>
+    </div>
+    <br>
+    <button id="btnDecode" style="width:50;margin-left: 10px;" onclick="test()">解密</button>
+</body>
+
+</html>
