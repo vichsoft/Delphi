@@ -25,13 +25,15 @@ type
     procedure FormCreate(Sender: TObject);
     procedure btnStartClick(Sender: TObject);
   private
+    FRecNo: Integer;
+    FOffset: Integer;
     FGetImageUrlJobGroup: TQJobGroup;
     FGetImageDataJobGroup: TQJobGroup;
     procedure DoGetUrl(AJob: PQJob);
     procedure DoGetData(AJob: PQJob);
     procedure DoneGetUrl(Sender: TObject);
     procedure DoneGetData(Sender: TObject);
-    procedure ParseImageUrl(const AData: string; var ATagList, AUrlList: TStringList);
+    procedure ParseImageUrl(const AData: string; var ATagList, AUrlList, ANameList: TStringList);
     procedure ReportGetUrl(AJob: PQJob);
     procedure ReportGetData(AJob: PQJob);
   public
@@ -39,6 +41,9 @@ type
 
 var
   frmImageXT: TfrmImageXT;
+
+const
+  PageSize = 100;
 
 implementation
 
@@ -49,6 +54,9 @@ uses
 
 procedure TfrmImageXT.FormCreate(Sender: TObject);
 begin
+  FRecNo := 0;
+  FOffset := 0;
+  //
   FGetImageUrlJobGroup := TQJobGroup.Create(True);
   FGetImageUrlJobGroup.AfterDone := DoneGetUrl;
   FGetImageUrlJobGroup.FreeAfterDone := False;
@@ -66,15 +74,14 @@ end;
 
 procedure TfrmImageXT.btnStartClick(Sender: TObject);
 var
-  I, RecNo: Integer;
+  I: Integer;
   lvImageItem: TQMsgPack;
-  lvImageUrlList, lvImageTagList: TStringList;
+  lvImageTagList, lvImageUrlList, lvImageNameList: TStringList;
   lvItemID, lvCatalogID, lvItemData: string;
 begin
   if not DestModule.Connect then
     frmDbConnect.ShowModal;
 
-  RecNo := 0;
   mmoImageUrl.Clear;
   mmoImageData.Clear;
 
@@ -83,33 +90,43 @@ begin
   FGetImageUrlJobGroup.Prepare;
   FGetImageDataJobGroup.Prepare;
   //
-  DestModule.GetItemImageList(mtImage);
+    //
+  DestModule.GetItemImageList(mtImage, FOffset, PageSize);
+  // 任务中止
+  if mtImage.RecordCount = 0 then
+  begin
+    mmoImageData.Lines.Add('全部任务完成');
+    Exit;
+  end;
+
   mtImage.First;
-  I := mtImage.RecordCount;
   while not mtImage.Eof do
   begin
     lvImageTagList := TStringList.Create;
     lvImageUrlList := TStringList.Create;
+    lvImageNameList := TStringList.Create;
+    //
     lvItemID := mtImage.FieldByName('FID').AsString;
     lvCatalogID := mtImage.FieldByName('FCatalogID').AsString;
     lvItemData := mtImage.FieldByName('FItemData').AsString;
     try
-      ParseImageUrl(lvItemData, lvImageTagList, lvImageUrlList);
+      ParseImageUrl(lvItemData, lvImageTagList, lvImageUrlList, lvImageNameList);
       for I := 0 to lvImageUrlList.Count - 1 do
       begin
-        Inc(RecNo);
+        Inc(FRecNo);
         lvImageItem := TQMsgPack.Create;
-        lvImageItem.Add('ImageID', Format('I%.6d', [RecNo]));
+        lvImageItem.Add('ImageID', Format('I%.6d', [FRecNo]));
         lvImageItem.Add('ItemID', lvItemID);
         lvImageItem.Add('CatalogID', lvCatalogID);
         lvImageItem.Add('ImageTag', lvImageTagList[I]);
         lvImageItem.Add('ImageUrl', lvImageUrlList[I]);
-        lvImageItem.Add('ImageName', TPath.GetFileName(lvImageUrlList[I]));
+        lvImageItem.Add('ImageName', lvImageNameList[I]);
         FGetImageUrlJobGroup.Add(DoGetUrl, lvImageItem, False, jdfFreeAsObject);
       end;
     finally
-      lvImageUrlList.Free;
       lvImageTagList.Free;
+      lvImageUrlList.Free;
+      lvImageNameList.Free;
     end;
     mtImage.Next;
   end;
@@ -178,23 +195,29 @@ begin
   lblFinishedTime.Caption := '完成时间:' + DateTimeToStr(Now);
   lblImageCount.Caption := Format('图片数量:%d', [mmoImageUrl.Lines.Count]);
   lblFinishedCount.Caption := Format('完成数量:%d', [mmoImageData.Lines.Count]);
-  mmoImageData.Lines.Add('任务完成');
+  //进行下一 轮任务
+  FOffset := FOffset + PageSize;
+  btnStart.Click;
 end;
 
-procedure TfrmImageXT.ParseImageUrl(const AData: string; var ATagList, AUrlList: TStringList);
+procedure TfrmImageXT.ParseImageUrl(const AData: string; var ATagList, AUrlList, ANameList: TStringList);
 const
   BaseUrl = 'http://60.205.163.175:8090';
-  Regex = '<img src=\\"(.*?[jpg|gif])\\".*?/>';
+  RegexUrl = '<img src=\\"(.*?)\\".*?/>';
+  RegexName = '\d/(.*?\.gif|.*?\.jpg|.*?\.png|.*?\.jpeg|.*?\.bmp)';
 var
   I: Integer;
+  lvUrl: string;
   lvList: TMatchCollection;
 begin
-  lvList := TRegEx.Matches(AData, Regex);
+  lvList := TRegEx.Matches(AData, RegexUrl);
 
   for I := 0 to lvList.Count - 1 do
   begin
     ATagList.Add(lvList[I].Value);
-    AUrlList.Add(BaseUrl + TRegEx.Replace(lvList[I].Groups[1].Value, BaseUrl, ''));
+    lvUrl := TRegEx.Replace(lvList[I].Groups[1].Value, BaseUrl, '');
+    AUrlList.Add(BaseUrl + lvUrl);
+    ANameList.Add(TRegEx.Match(lvUrl, RegexName).Groups[1].Value);
   end;
 end;
 

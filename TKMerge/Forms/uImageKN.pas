@@ -7,7 +7,7 @@ uses
   System.Classes, Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, cxGraphics,
   cxLookAndFeels, cxLookAndFeelPainters, Vcl.Menus, dxSkinsCore,
   dxSkinsDefaultPainters, cxControls, cxContainer, cxEdit, Vcl.StdCtrls, cxLabel,
-  System.IOUtils, cxButtons, Data.DB, kbmMemTable,
+  System.IOUtils, cxButtons, Data.DB, kbmMemTable, System.NetEncoding,
   //
   QWorker, qmsgpack, OverbyteIcsWndControl, OverbyteIcsHttpProt,
   OverbyteIcsWSocket;
@@ -27,13 +27,15 @@ type
     procedure FormCreate(Sender: TObject);
     procedure btnStartClick(Sender: TObject);
   private
+    FRecNo: Integer;
+    FOffset: Integer;
     FGetImageUrlJobGroup: TQJobGroup;
     FGetImageDataJobGroup: TQJobGroup;
     procedure DoGetUrl(AJob: PQJob);
     procedure DoGetData(AJob: PQJob);
     procedure DoneGetUrl(Sender: TObject);
     procedure DoneGetData(Sender: TObject);
-    procedure ParseImageUrl(const AData, ACatalogID: string; var ATagList, AUrlList: TStringList);
+    procedure ParseImageUrl(const AData, ACatalogID: string; var ATagList, AUrlList, ANameList: TStringList);
     procedure ReportGetUrl(AJob: PQJob);
     procedure ReportGetData(AJob: PQJob);
   public
@@ -42,15 +44,21 @@ type
 var
   frmImageKN: TfrmImageKN;
 
+const
+  PageSize = 100;
+
 implementation
 
 uses
-  uDestModule, uDBConnect, uGlobalObject, RegularExpressions, Web.HTTPApp;
+  uDestModule, uDBConnect, uGlobalObject, RegularExpressions;
 
 {$R *.dfm}
 
 procedure TfrmImageKN.FormCreate(Sender: TObject);
 begin
+  FRecNo := 0;
+  FOffset := 0;
+  //
   FGetImageUrlJobGroup := TQJobGroup.Create(True);
   FGetImageUrlJobGroup.AfterDone := DoneGetUrl;
   FGetImageUrlJobGroup.FreeAfterDone := False;
@@ -68,15 +76,14 @@ end;
 
 procedure TfrmImageKN.btnStartClick(Sender: TObject);
 var
-  I, RecNo: Integer;
+  I: Integer;
   lvImageItem: TQMsgPack;
-  lvImageUrlList, lvImageTagList: TStringList;
+  lvImageTagList, lvImageUrlList, lvImageNameList: TStringList;
   lvItemID, lvCatalogID, lvItemData: string;
 begin
   if not DestModule.Connect then
     frmDbConnect.ShowModal;
 
-  RecNo := 0;
   mmoImageUrl.Clear;
   mmoImageData.Clear;
 
@@ -85,33 +92,42 @@ begin
   FGetImageUrlJobGroup.Prepare;
   FGetImageDataJobGroup.Prepare;
   //
-  DestModule.GetItemImageList(mtImage);
+  DestModule.GetItemImageList(mtImage, FOffset, PageSize);
+  // 任务中止
+  if mtImage.RecordCount = 0 then
+  begin
+    mmoImageData.Lines.Add('全部任务完成');
+    Exit;
+  end;
+
   mtImage.First;
-  I := mtImage.RecordCount;
   while not mtImage.Eof do
   begin
     lvImageTagList := TStringList.Create;
     lvImageUrlList := TStringList.Create;
+    lvImageNameList := TStringList.Create;
+    //
     lvItemID := mtImage.FieldByName('FID').AsString;
     lvCatalogID := mtImage.FieldByName('FCatalogID').AsString;
     lvItemData := mtImage.FieldByName('FItemData').AsString;
     try
-      ParseImageUrl(lvItemData, lvCatalogID, lvImageTagList, lvImageUrlList);
+      ParseImageUrl(lvItemData, lvCatalogID, lvImageTagList, lvImageUrlList, lvImageNameList);
       for I := 0 to lvImageUrlList.Count - 1 do
       begin
-        Inc(RecNo);
+        Inc(FRecNo);
         lvImageItem := TQMsgPack.Create;
-        lvImageItem.Add('ImageID', Format('I%.6d', [RecNo]));
+        lvImageItem.Add('ImageID', Format('I%.6d', [FRecNo]));
         lvImageItem.Add('ItemID', lvItemID);
         lvImageItem.Add('CatalogID', lvCatalogID);
         lvImageItem.Add('ImageTag', lvImageTagList[I]);
         lvImageItem.Add('ImageUrl', lvImageUrlList[I]);
-        lvImageItem.Add('ImageName', TRegEx.Match(lvImageTagList[I], '\[(.*?[jpg|gif])\]').Groups[1].Value);
+        lvImageItem.Add('ImageName', lvImageNameList[I]);
         FGetImageUrlJobGroup.Add(DoGetUrl, lvImageItem, False, jdfFreeAsObject);
       end;
     finally
-      lvImageUrlList.Free;
       lvImageTagList.Free;
+      lvImageUrlList.Free;
+      lvImageNameList.Free;
     end;
     mtImage.Next;
   end;
@@ -165,8 +181,7 @@ begin
     lvStream.Free;
     lvHttp.Free;
   end;
-//  lvImage.Add('ImageName', TQMsgPack(AJob.Data).ItemByName('ImageName').AsString);
-  lvImage.Add('ImageName', lvUrl);
+  lvImage.Add('ImageName', TQMsgPack(AJob.Data).ItemByName('ImageName').AsString);
   Workers.Post(ReportGetData, lvImage, True, jdfFreeAsObject);
 end;
 
@@ -184,26 +199,29 @@ begin
   lblFinishedTime.Caption := '完成时间:' + DateTimeToStr(Now);
   lblImageCount.Caption := Format('图片数量:%d', [mmoImageUrl.Lines.Count]);
   lblFinishedCount.Caption := Format('完成数量:%d', [mmoImageData.Lines.Count]);
-  mmoImageData.Lines.Add('任务完成');
+  //进行下一 轮任务
+  FOffset := FOffset + PageSize;
+  btnStart.Click;
 end;
 
-procedure TfrmImageKN.ParseImageUrl(const AData, ACatalogID: string; var ATagList, AUrlList: TStringList);
+procedure TfrmImageKN.ParseImageUrl(const AData, ACatalogID: string; var ATagList, AUrlList, ANameList: TStringList);
 const
-  Regex = '\[(.*?[jpg|gif])\]';
-  baseUrl = 'https://testimages.ksbao.com/tk_img/ImgDir_%s/';
+  BaseUrl = 'https://testimages.ksbao.com/tk_img/ImgDir_%s/';
+  RegexUrl = '\[(.*?\.gif|.*?\.jpg|.*?\.png|.*?\.jpeg|.*?\.bmp)\]';
 var
   I: Integer;
-  Url, SubjectID: string;
+  lvUrl, lvSubjectID: string;
   lvList: TMatchCollection;
 begin
-  SubjectID := TRegEx.Split(ACatalogID, ':')[1];
-  lvList := TRegEx.Matches(AData, Regex);
+  lvSubjectID := TRegEx.Split(ACatalogID, ':')[1];
+  lvList := TRegEx.Matches(AData, RegexUrl);
   for I := 0 to lvList.Count - 1 do
   begin
     ATagList.Add(lvList[I].Value);
     //有些图片名称包含“+”等特殊字符，需要进行转码后才能下载
-    Url := Format(baseUrl, [SubjectID]) + HTTPEncode(lvList[I].Groups[1].Value);
-    AUrlList.Add(Url);
+    lvUrl := Format(BaseUrl, [lvSubjectID]) + TNetEncoding.Url.Encode(lvList[I].Groups[1].Value);
+    AUrlList.Add(lvUrl);
+    ANameList.Add(lvList[I].Groups[1].Value);
   end;
 end;
 
